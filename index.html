@@ -1,0 +1,781 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gym Passport — Benefit Tracker</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --text-primary:#0b0b0b;--text-secondary:#52514e;--text-muted:#898781;
+  --surface-0:#f4f3f0;--surface-1:#f8f8f7;--surface-2:#ffffff;
+  --border:rgba(11,11,11,.1);--border-strong:rgba(11,11,11,.2);--border-stronger:rgba(11,11,11,.35);
+  --radius:8px;
+}
+@media(prefers-color-scheme:dark){
+  :root{
+    --text-primary:#f0efe9;--text-secondary:#b0afa7;--text-muted:#6b6a65;
+    --surface-0:#111110;--surface-1:#1a1a19;--surface-2:#242423;
+    --border:rgba(255,255,255,.08);--border-strong:rgba(255,255,255,.15);--border-stronger:rgba(255,255,255,.25);
+  }
+}
+html,body{height:100%;background:var(--surface-0);color:var(--text-primary);font-family:system-ui,-apple-system,sans-serif;font-size:14px}
+
+/* ── Login screen ── */
+#login-screen{display:flex;align-items:center;justify-content:center;min-height:100vh;background:var(--surface-0)}
+.login-card{background:var(--surface-2);border:0.5px solid var(--border);border-radius:16px;padding:36px 32px;width:340px;max-width:90vw;text-align:center}
+.login-icon{width:48px;height:48px;border-radius:12px;background:#e6f1fb;display:flex;align-items:center;justify-content:center;margin:0 auto 18px;font-size:22px;color:#2a78d6}
+.login-title{font-size:17px;font-weight:500;margin-bottom:4px}
+.login-sub{font-size:12px;color:var(--text-muted);margin-bottom:24px}
+.login-input{width:100%;padding:10px 14px;border:0.5px solid var(--border-strong);border-radius:var(--radius);font-size:14px;background:var(--surface-1);color:var(--text-primary);margin-bottom:10px;font-family:inherit}
+.login-input:focus{outline:none;border-color:#2a78d6}
+.login-btn{width:100%;padding:10px;border-radius:var(--radius);border:none;background:#0b0b0b;color:#fff;font-size:14px;cursor:pointer;font-family:inherit}
+.login-btn:hover{background:#2c2c2a}
+.login-err{font-size:12px;color:#e34948;margin-top:8px;display:none}
+
+/* ── App shell ── */
+#app{display:none;height:100vh;display:none;grid-template-columns:210px 1fr;grid-template-rows:1fr}
+
+/* ── Sidebar ── */
+.sidebar{background:var(--surface-1);border-right:0.5px solid var(--border);display:flex;flex-direction:column;height:100vh;overflow-y:auto}
+.sidebar-logo{padding:18px 18px 16px;border-bottom:0.5px solid var(--border)}
+.logo-mark{font-size:13px;font-weight:600;letter-spacing:-.01em}
+.logo-sub{font-size:11px;color:var(--text-muted);margin-top:2px}
+.nav-section{padding:14px 18px 6px;font-size:10px;letter-spacing:.07em;text-transform:uppercase;color:var(--text-muted)}
+.nav-item{display:flex;align-items:center;gap:9px;padding:8px 18px;font-size:13px;cursor:pointer;color:var(--text-secondary);border-left:2px solid transparent;transition:all .1s;background:none;border-top:none;border-right:none;border-bottom:none;width:100%;text-align:left}
+.nav-item:hover{background:var(--surface-2);color:var(--text-primary)}
+.nav-item.active{background:var(--surface-2);color:var(--text-primary);border-left-color:#2a78d6;font-weight:500}
+.nav-item i{font-size:16px;width:18px}
+.sidebar-months{display:flex;flex-direction:column;gap:2px;padding:6px 10px}
+.month-chip{padding:6px 12px;border-radius:6px;font-size:12px;cursor:pointer;color:var(--text-secondary);background:none;border:none;display:flex;align-items:center;justify-content:space-between;width:100%;transition:all .1s;font-family:inherit}
+.month-chip:hover{background:var(--surface-2)}
+.month-chip.active{background:var(--surface-2);color:var(--text-primary);font-weight:500}
+.chip-badge{font-size:10px;background:var(--surface-0);border:0.5px solid var(--border);border-radius:10px;padding:1px 6px;color:var(--text-muted)}
+.month-chip.active .chip-badge{background:#e6f1fb;color:#185fa5;border-color:#b5d4f4}
+.sidebar-bottom{margin-top:auto;padding:12px 10px;border-top:0.5px solid var(--border)}
+
+/* ── Main ── */
+.main{display:flex;flex-direction:column;height:100vh;overflow:hidden}
+.topbar{display:flex;align-items:center;justify-content:space-between;padding:14px 24px;border-bottom:0.5px solid var(--border);flex-shrink:0}
+.topbar-left .title{font-size:15px;font-weight:500}
+.topbar-left .sub{font-size:12px;color:var(--text-muted);margin-top:1px}
+.topbar-actions{display:flex;gap:8px}
+.btn{display:inline-flex;align-items:center;gap:5px;padding:7px 14px;border-radius:var(--radius);border:0.5px solid var(--border-strong);background:transparent;cursor:pointer;font-size:12px;color:var(--text-secondary);transition:all .1s;font-family:inherit}
+.btn:hover{background:var(--surface-1)}
+.btn.primary{background:#0b0b0b;color:#fff;border-color:#0b0b0b}
+.btn.primary:hover{background:#2c2c2a}
+.btn i{font-size:14px}
+.view-tabs{display:flex;gap:2px;padding:0 24px;border-bottom:0.5px solid var(--border);flex-shrink:0}
+.view-tab{padding:10px 14px;font-size:12px;cursor:pointer;color:var(--text-muted);border-bottom:2px solid transparent;background:none;border-top:none;border-left:none;border-right:none;transition:all .1s;font-family:inherit}
+.view-tab:hover{color:var(--text-secondary)}
+.view-tab.active{color:#2a78d6;border-bottom-color:#2a78d6;font-weight:500}
+.content{padding:20px 24px;overflow-y:auto;flex:1}
+
+/* ── KPI ── */
+.kpi-row{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:18px}
+.kpi{background:var(--surface-1);border-radius:10px;padding:14px 16px}
+.kpi-label{font-size:10px;color:var(--text-muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:.05em}
+.kpi-value{font-size:24px;font-weight:500;line-height:1}
+.kpi-delta{font-size:11px;margin-top:5px;display:flex;align-items:center;gap:3px}
+.c-blue{color:#2a78d6}.c-green{color:#1baf7a}.c-red{color:#e34948}.c-amber{color:#eda100}
+.delta-up{color:#1baf7a}.delta-down{color:#e34948}.delta-neutral{color:var(--text-muted)}
+
+/* ── Cards & tables ── */
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px}
+.card{background:var(--surface-2);border:0.5px solid var(--border);border-radius:12px;overflow:hidden}
+.card-head{display:flex;align-items:center;justify-content:space-between;padding:13px 16px;border-bottom:0.5px solid var(--border)}
+.card-title{font-size:13px;font-weight:500}
+.card-link{font-size:11px;color:#2a78d6;cursor:pointer;background:none;border:none;padding:3px 7px;border-radius:5px;font-family:inherit}
+.card-link:hover{background:#e6f1fb}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th{text-align:left;padding:7px 12px;font-weight:500;font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);border-bottom:0.5px solid var(--border)}
+td{padding:8px 12px;border-bottom:0.5px solid var(--border);border-bottom-color:var(--border)}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:var(--surface-1)}
+.t-name{font-weight:500}
+.t-muted{color:var(--text-muted)}
+.t-secondary{color:var(--text-secondary)}
+
+/* ── Sessions ── */
+.sess-input{width:54px;padding:4px 8px;border:0.5px solid var(--border);border-radius:6px;font-size:12px;text-align:center;background:var(--surface-1);color:var(--text-primary);font-family:inherit}
+.sess-input:focus{outline:none;border-color:#2a78d6}
+.bar-track{flex:1;height:6px;background:var(--surface-0);border-radius:3px;overflow:hidden}
+.bar-fill{height:100%;border-radius:3px}
+
+/* ── Search & pagination ── */
+.search-row{display:flex;align-items:center;gap:8px;margin-bottom:12px}
+.search-wrap{position:relative;flex:1}
+.search-wrap i{position:absolute;left:9px;top:50%;transform:translateY(-50%);font-size:14px;color:var(--text-muted);pointer-events:none}
+.search-input{width:100%;padding:7px 10px 7px 30px;border:0.5px solid var(--border-strong);border-radius:var(--radius);font-size:12px;background:var(--surface-1);color:var(--text-primary);font-family:inherit}
+.search-input:focus{outline:none;border-color:#2a78d6}
+.pager{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-top:0.5px solid var(--border);font-size:11px;color:var(--text-muted)}
+.pager button{padding:4px 10px;border:0.5px solid var(--border);border-radius:6px;background:none;cursor:pointer;font-size:11px;color:var(--text-secondary);font-family:inherit}
+.pager button:hover{background:var(--surface-1)}
+.pager button:disabled{opacity:.4;cursor:default}
+
+/* ── Delete ── */
+.del-btn{background:none;border:none;cursor:pointer;color:var(--text-muted);padding:3px 5px;border-radius:4px;font-size:13px;opacity:0;transition:opacity .1s}
+tr:hover .del-btn{opacity:1}
+.del-btn:hover{color:#e34948}
+
+/* ── Audit bars ── */
+.bar-mini{display:flex;align-items:center;gap:8px;margin-bottom:7px}
+.bar-label{font-size:11px;width:52px;color:var(--text-secondary);flex-shrink:0;text-align:right}
+.bar-val{font-size:11px;color:var(--text-muted);width:24px;text-align:right}
+
+/* ── Modal ── */
+.modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:200}
+.modal{background:var(--surface-2);border-radius:14px;border:0.5px solid var(--border);padding:24px;width:400px;max-width:95vw}
+.modal h3{font-size:15px;font-weight:500;margin-bottom:3px}
+.modal-sub{font-size:12px;color:var(--text-muted);margin-bottom:18px}
+.form-row{margin-bottom:12px}
+.form-row label{display:block;font-size:10px;font-weight:500;text-transform:uppercase;letter-spacing:.05em;color:var(--text-secondary);margin-bottom:4px}
+.form-row input,.form-row select,.form-row textarea{width:100%;padding:8px 11px;border:0.5px solid var(--border-strong);border-radius:var(--radius);font-size:13px;background:var(--surface-1);color:var(--text-primary);font-family:inherit}
+.form-row input:focus,.form-row select:focus,.form-row textarea:focus{outline:none;border-color:#2a78d6}
+.form-row textarea{resize:vertical;min-height:100px}
+.modal-footer{display:flex;justify-content:flex-end;gap:8px;margin-top:18px}
+.modal-footer button{padding:8px 18px;border-radius:var(--radius);border:0.5px solid var(--border-strong);background:transparent;cursor:pointer;font-size:13px;font-family:inherit;color:var(--text-secondary)}
+.modal-footer .btn-primary{background:#0b0b0b;color:#fff;border-color:#0b0b0b}
+.modal-footer .btn-primary:hover{background:#2c2c2a}
+
+/* ── Chart wrap ── */
+.chart-wrap{position:relative;width:100%}
+
+/* ── Empty ── */
+.empty-state{padding:32px;text-align:center;color:var(--text-muted);font-size:12px}
+.empty-state i{font-size:28px;display:block;margin-bottom:8px;opacity:.35}
+
+/* ── Toast ── */
+.toast{position:fixed;bottom:20px;right:20px;background:#0b0b0b;color:#fff;padding:10px 16px;border-radius:var(--radius);font-size:12px;z-index:300;opacity:0;transform:translateY(6px);transition:all .2s;pointer-events:none}
+.toast.show{opacity:1;transform:translateY(0)}
+</style>
+</head>
+<body>
+
+<!-- Login -->
+<div id="login-screen">
+  <div class="login-card">
+    <div class="login-icon"><i class="ti ti-barbell"></i></div>
+    <div class="login-title">Gym Passport tracker</div>
+    <div class="login-sub">Enter your password to continue</div>
+    <input class="login-input" type="password" id="pw-input" placeholder="Password" onkeydown="if(event.key==='Enter')tryLogin()">
+    <button class="login-btn" onclick="tryLogin()">Sign in</button>
+    <div class="login-err" id="pw-err">Incorrect password</div>
+  </div>
+</div>
+
+<!-- App -->
+<div id="app" style="display:none">
+  <div class="sidebar">
+    <div class="sidebar-logo">
+      <div class="logo-mark">Gym Passport</div>
+      <div class="logo-sub">Benefit tracker</div>
+    </div>
+    <div class="nav-section">Views</div>
+    <button class="nav-item active" onclick="switchNav('overview')" id="nav-overview"><i class="ti ti-layout-dashboard"></i>Overview</button>
+    <button class="nav-item" onclick="switchNav('members')" id="nav-members"><i class="ti ti-users"></i>Members</button>
+    <button class="nav-item" onclick="switchNav('sessions')" id="nav-sessions"><i class="ti ti-activity"></i>Sessions</button>
+    <button class="nav-item" onclick="switchNav('audit')" id="nav-audit"><i class="ti ti-clipboard-list"></i>Audit log</button>
+    <div class="nav-section">Months</div>
+    <div class="sidebar-months" id="month-chips"></div>
+    <div style="padding:6px 10px">
+      <button class="btn" style="width:100%;justify-content:center;font-size:11px" onclick="addNextMonth()"><i class="ti ti-plus"></i>Add month</button>
+    </div>
+    <div class="sidebar-bottom">
+      <button class="btn" style="width:100%;justify-content:center;font-size:11px" onclick="logout()"><i class="ti ti-logout"></i>Sign out</button>
+    </div>
+  </div>
+
+  <div class="main">
+    <div class="topbar">
+      <div class="topbar-left">
+        <div class="title" id="topbar-title">Overview</div>
+        <div class="sub" id="topbar-sub"></div>
+      </div>
+      <div class="topbar-actions" id="topbar-actions"></div>
+    </div>
+    <div class="view-tabs" id="view-tabs" style="display:none">
+      <button class="view-tab active" onclick="switchViewTab('activations')" id="vtab-activations">Activations</button>
+      <button class="view-tab" onclick="switchViewTab('deactivations')" id="vtab-deactivations">Deactivations</button>
+    </div>
+    <div class="content" id="main-content"></div>
+  </div>
+</div>
+
+<div id="modal-root"></div>
+<div class="toast" id="toast"></div>
+
+<script>
+const PASSWORD = 'gympassport';
+const SESSION_KEY = 'gp_auth';
+const STORE_KEY = 'gp-dash-v2';
+const MONTHS_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+// ── Auth ─────────────────────────────────────────────────
+function tryLogin() {
+  const val = document.getElementById('pw-input').value;
+  if (val === PASSWORD) {
+    sessionStorage.setItem(SESSION_KEY, '1');
+    document.getElementById('login-screen').style.display = 'none';
+    document.getElementById('app').style.display = 'grid';
+    init();
+  } else {
+    document.getElementById('pw-err').style.display = 'block';
+    document.getElementById('pw-input').value = '';
+    document.getElementById('pw-input').focus();
+  }
+}
+
+function logout() {
+  sessionStorage.removeItem(SESSION_KEY);
+  location.reload();
+}
+
+// ── State ─────────────────────────────────────────────────
+let S = {
+  months: ['2025-04','2025-05','2025-06'],
+  activeMonth: '2025-06',
+  data: {},
+  nav: 'overview',
+  membersTab: 'activations',
+  searchQ: '',
+  page: 0,
+  PAGE_SIZE: 15
+};
+
+function init() {
+  const saved = localStorage.getItem(STORE_KEY);
+  if (saved) {
+    try {
+      const p = JSON.parse(saved);
+      S.months = p.months || S.months;
+      S.data = p.data || {};
+    } catch(e) {}
+  }
+  S.activeMonth = S.months[S.months.length - 1];
+  render();
+}
+
+function save() {
+  localStorage.setItem(STORE_KEY, JSON.stringify({months: S.months, data: S.data}));
+}
+
+// ── Data helpers ──────────────────────────────────────────
+function monthData(m) {
+  if (!S.data[m]) S.data[m] = {activations:[], deactivations:[], sessions:{}};
+  return S.data[m];
+}
+
+function monthLabel(m) {
+  const [y, mo] = m.split('-');
+  return MONTHS_SHORT[parseInt(mo)-1] + ' ' + y;
+}
+
+function getActiveMembers(upToMonth) {
+  const members = new Map();
+  for (const m of S.months) {
+    const d = monthData(m);
+    for (const a of d.activations) members.set(a.name, {...a, activatedIn: m});
+    for (const a of d.deactivations) members.delete(a.name);
+    if (m === upToMonth) break;
+  }
+  return members;
+}
+
+function getActiveMembersArr(m) {
+  return [...getActiveMembers(m).values()].sort((a,b) => a.name.localeCompare(b.name));
+}
+
+function getPrevMonth(m) {
+  const idx = S.months.indexOf(m);
+  return idx > 0 ? S.months[idx-1] : null;
+}
+
+function deltaEl(curr, prev) {
+  if (prev === null) return '<span class="delta-neutral">First month</span>';
+  const d = curr - prev;
+  if (d > 0) return `<span class="delta-up">↑ ${d} vs last month</span>`;
+  if (d < 0) return `<span class="delta-down">↓ ${Math.abs(d)} vs last month</span>`;
+  return '<span class="delta-neutral">No change</span>';
+}
+
+// ── Navigation ────────────────────────────────────────────
+function switchNav(nav) {
+  S.nav = nav; S.page = 0; S.searchQ = '';
+  document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+  document.getElementById('nav-' + nav)?.classList.add('active');
+  document.getElementById('view-tabs').style.display = nav === 'members' ? 'flex' : 'none';
+  render();
+}
+
+function switchViewTab(tab) {
+  S.membersTab = tab; S.page = 0;
+  document.querySelectorAll('.view-tab').forEach(el => el.classList.remove('active'));
+  document.getElementById('vtab-' + tab)?.classList.add('active');
+  renderContent();
+}
+
+function switchMonth(m) {
+  S.activeMonth = m; S.page = 0;
+  renderSidebar(); render();
+}
+
+function addNextMonth() {
+  const last = S.months[S.months.length - 1];
+  const [y, mo] = last.split('-').map(Number);
+  let ny = y, nmo = mo + 1;
+  if (nmo > 12) { nmo = 1; ny++; }
+  const next = `${ny}-${String(nmo).padStart(2,'0')}`;
+  if (!S.months.includes(next)) {
+    S.months.push(next);
+    S.activeMonth = next;
+    save(); render();
+  }
+}
+
+// ── Render ────────────────────────────────────────────────
+function render() { renderSidebar(); renderTopbar(); renderContent(); }
+
+function renderSidebar() {
+  document.getElementById('month-chips').innerHTML = S.months.map(m => {
+    const active = getActiveMembersArr(m).length;
+    return `<button class="month-chip ${m===S.activeMonth?'active':''}" onclick="switchMonth('${m}')">
+      ${monthLabel(m)} <span class="chip-badge">${active}</span>
+    </button>`;
+  }).join('');
+}
+
+function renderTopbar() {
+  const titles = {overview:'Overview', members:'Members', sessions:'Sessions', audit:'Audit log'};
+  document.getElementById('topbar-title').textContent = titles[S.nav] || '';
+  document.getElementById('topbar-sub').textContent = monthLabel(S.activeMonth);
+  const acts = {
+    overview: `<button class="btn primary" onclick="showAddModal('activation')"><i class="ti ti-plus"></i>Log activation</button><button class="btn" onclick="showBulkModal()"><i class="ti ti-upload"></i>Bulk import</button>`,
+    members:  `<button class="btn primary" onclick="showAddModal(S.membersTab==='activations'?'activation':'deactivation')"><i class="ti ti-plus"></i>Add entry</button><button class="btn" onclick="showBulkModal()"><i class="ti ti-upload"></i>Bulk import</button>`,
+    sessions: `<button class="btn" onclick="showBulkSessionModal()"><i class="ti ti-upload"></i>Paste sessions</button>`,
+    audit: ''
+  };
+  document.getElementById('topbar-actions').innerHTML = acts[S.nav] || '';
+}
+
+function renderContent() {
+  ({overview: renderOverview, members: renderMembers, sessions: renderSessions, audit: renderAudit}[S.nav] || renderOverview)();
+}
+
+// ── Overview ──────────────────────────────────────────────
+function renderOverview() {
+  const m = S.activeMonth;
+  const d = monthData(m);
+  const prev = getPrevMonth(m);
+  const activeNow = getActiveMembersArr(m).length;
+  const activePrev = prev ? getActiveMembersArr(prev).length : null;
+  const acts = d.activations.length;
+  const actsPrev = prev ? monthData(prev).activations.length : null;
+  const deacts = d.deactivations.length;
+  const deactsPrev = prev ? monthData(prev).deactivations.length : null;
+  const totalSess = Object.values(d.sessions).reduce((a,b) => a+(parseInt(b)||0), 0);
+  const sessPrev = prev ? Object.values(monthData(prev).sessions).reduce((a,b) => a+(parseInt(b)||0), 0) : null;
+  const avgSess = activeNow > 0 ? (totalSess/activeNow).toFixed(1) : '0.0';
+  const sparkData = S.months.map(mo => getActiveMembersArr(mo).length);
+  const maxSpark = Math.max(...sparkData, 1);
+  const chartLabels = S.months.map(monthLabel);
+  const chartActs = S.months.map(mo => monthData(mo).activations.length);
+  const chartDeacts = S.months.map(mo => monthData(mo).deactivations.length);
+  const chartActive = S.months.map(mo => getActiveMembersArr(mo).length);
+  const chartSessions = S.months.map(mo => Object.values(monthData(mo).sessions).reduce((a,b) => a+(parseInt(b)||0), 0));
+
+  document.getElementById('main-content').innerHTML = `
+    <div class="kpi-row">
+      <div class="kpi">
+        <div class="kpi-label">Active members</div>
+        <div class="kpi-value c-blue">${activeNow}</div>
+        <div class="kpi-delta">${deltaEl(activeNow, activePrev)}</div>
+        <div style="margin-top:8px">${miniSpark(sparkData, maxSpark, '#2a78d6')}</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-label">Activations</div>
+        <div class="kpi-value c-green">+${acts}</div>
+        <div class="kpi-delta">${deltaEl(acts, actsPrev)}</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-label">Deactivations</div>
+        <div class="kpi-value c-red">${deacts}</div>
+        <div class="kpi-delta">${deltaEl(deacts, deactsPrev)}</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-label">Total sessions</div>
+        <div class="kpi-value c-amber">${totalSess}</div>
+        <div class="kpi-delta">${deltaEl(totalSess, sessPrev)}</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-label">Avg sessions/member</div>
+        <div class="kpi-value">${avgSess}</div>
+        <div class="kpi-delta"><span class="delta-neutral">This month</span></div>
+      </div>
+    </div>
+
+    <div class="grid-2">
+      <div class="card">
+        <div class="card-head"><span class="card-title">Activations vs deactivations</span></div>
+        <div style="padding:16px">
+          <div class="chart-wrap" style="height:170px"><canvas id="ch-ad" role="img" aria-label="Activations and deactivations by month"></canvas></div>
+          <div style="display:flex;gap:16px;margin-top:10px;font-size:11px;color:var(--text-secondary)">
+            <span style="display:flex;align-items:center;gap:5px"><span style="width:10px;height:10px;border-radius:2px;background:#1baf7a;display:inline-block"></span>Activations</span>
+            <span style="display:flex;align-items:center;gap:5px"><span style="width:10px;height:10px;border-radius:2px;background:#e34948;display:inline-block"></span>Deactivations</span>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-head"><span class="card-title">Active members trend</span></div>
+        <div style="padding:16px">
+          <div class="chart-wrap" style="height:170px"><canvas id="ch-active" role="img" aria-label="Active members over time"></canvas></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid-2">
+      <div class="card">
+        <div class="card-head"><span class="card-title">Sessions by month</span></div>
+        <div style="padding:16px">
+          <div class="chart-wrap" style="height:130px"><canvas id="ch-sess" role="img" aria-label="Sessions per month"></canvas></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-head"><span class="card-title">Recent activations — ${monthLabel(m)}</span><button class="card-link" onclick="switchNav('members')">View all →</button></div>
+        ${d.activations.length === 0
+          ? '<div class="empty-state"><i class="ti ti-user-plus"></i>No activations yet</div>'
+          : `<table><thead><tr><th>Name</th><th>Date</th><th>Notes</th></tr></thead><tbody>
+            ${d.activations.slice(-7).map(a=>`<tr><td class="t-name">${escHtml(a.name)}</td><td class="t-muted">${a.date||'—'}</td><td class="t-muted">${escHtml(a.notes)||'—'}</td></tr>`).join('')}
+            </tbody></table>`}
+      </div>
+    </div>
+  `;
+
+  setTimeout(() => {
+    const mkChart = (id, type, labels, datasets, extra={}) => {
+      const ctx = document.getElementById(id);
+      if (!ctx) return;
+      new Chart(ctx, {type, data:{labels, datasets}, options:{
+        responsive:true, maintainAspectRatio:false,
+        plugins:{legend:{display:false}},
+        scales:{x:{ticks:{font:{size:10},autoSkip:false,maxRotation:0},grid:{display:false}},y:{ticks:{font:{size:10}},beginAtZero:true,grid:{color:'rgba(0,0,0,.04)'}}},
+        ...extra
+      }});
+    };
+    mkChart('ch-ad','bar',chartLabels,[
+      {label:'Activations',data:chartActs,backgroundColor:'#1baf7a',borderRadius:4,barPercentage:.6},
+      {label:'Deactivations',data:chartDeacts,backgroundColor:'#e34948',borderRadius:4,barPercentage:.6}
+    ]);
+    mkChart('ch-active','line',chartLabels,[
+      {label:'Active',data:chartActive,borderColor:'#2a78d6',backgroundColor:'rgba(42,120,214,.08)',fill:true,tension:.4,pointRadius:4,pointBackgroundColor:'#2a78d6',pointBorderColor:'#fff',pointBorderWidth:2}
+    ]);
+    mkChart('ch-sess','bar',chartLabels,[
+      {label:'Sessions',data:chartSessions,backgroundColor:'#eda100',borderRadius:4,barPercentage:.5}
+    ]);
+  }, 50);
+}
+
+function miniSpark(data, maxVal, color) {
+  const w=120, h=24;
+  const pts = data.map((v,i) => `${(i/Math.max(data.length-1,1))*w},${h-(v/maxVal)*h}`);
+  return `<svg viewBox="0 0 ${w} ${h}" width="${w}" height="${h}"><polyline points="${pts.join(' ')}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/></svg>`;
+}
+
+// ── Members ───────────────────────────────────────────────
+function renderMembers() {
+  const m = S.activeMonth;
+  const d = monthData(m);
+  const isAct = S.membersTab === 'activations';
+  const list = isAct ? d.activations : d.deactivations;
+  const q = S.searchQ.toLowerCase();
+  const filtered = list.filter(e => e.name.toLowerCase().includes(q) || (e.notes||'').toLowerCase().includes(q));
+  const pages = Math.ceil(filtered.length / S.PAGE_SIZE);
+  const pageItems = filtered.slice(S.page*S.PAGE_SIZE, (S.page+1)*S.PAGE_SIZE);
+
+  document.getElementById('main-content').innerHTML = `
+    <div class="search-row">
+      <div class="search-wrap">
+        <i class="ti ti-search"></i>
+        <input class="search-input" placeholder="Search by name or notes…" value="${escHtml(S.searchQ)}" oninput="S.searchQ=this.value;S.page=0;renderMembers()">
+      </div>
+      <span style="font-size:11px;color:var(--text-muted)">${filtered.length} ${isAct?'activations':'deactivations'}</span>
+    </div>
+    <div class="card">
+      ${filtered.length === 0
+        ? `<div class="empty-state"><i class="ti ti-${isAct?'user-plus':'user-minus'}"></i>${S.searchQ?'No results':'No '+S.membersTab+' this month'}</div>`
+        : `<table><thead><tr><th>#</th><th>Employee name</th><th>Date</th><th>${isAct?'Notes':'Reason'}</th><th></th></tr></thead><tbody>
+          ${pageItems.map((e,i) => {
+            const globalIdx = list.indexOf(e);
+            return `<tr>
+              <td class="t-muted">${S.page*S.PAGE_SIZE+i+1}</td>
+              <td class="t-name">${escHtml(e.name)}</td>
+              <td class="t-muted">${e.date||'—'}</td>
+              <td class="t-secondary">${escHtml(e.notes)||'—'}</td>
+              <td><button class="del-btn" onclick="deleteEntry('${isAct?'activation':'deactivation'}',${globalIdx})"><i class="ti ti-trash"></i></button></td>
+            </tr>`;
+          }).join('')}
+          </tbody></table>
+          ${pages>1?`<div class="pager">
+            <button onclick="S.page--;renderMembers()" ${S.page===0?'disabled':''}>← Prev</button>
+            <span>Page ${S.page+1} of ${pages}</span>
+            <button onclick="S.page++;renderMembers()" ${S.page>=pages-1?'disabled':''}>Next →</button>
+          </div>`:''}`}
+    </div>
+  `;
+}
+
+// ── Sessions ──────────────────────────────────────────────
+function renderSessions() {
+  const m = S.activeMonth;
+  const d = monthData(m);
+  const members = getActiveMembersArr(m);
+  const q = S.searchQ.toLowerCase();
+  const filtered = members.filter(mem => mem.name.toLowerCase().includes(q));
+  const pages = Math.ceil(filtered.length / S.PAGE_SIZE);
+  const pageItems = filtered.slice(S.page*S.PAGE_SIZE, (S.page+1)*S.PAGE_SIZE);
+  const totalSess = members.reduce((a,mem) => a+(parseInt(d.sessions[mem.name])||0), 0);
+  const maxSess = Math.max(...members.map(mem => parseInt(d.sessions[mem.name])||0), 1);
+
+  document.getElementById('main-content').innerHTML = `
+    <div class="kpi-row" style="grid-template-columns:repeat(3,1fr);margin-bottom:14px">
+      <div class="kpi"><div class="kpi-label">Active members</div><div class="kpi-value c-blue">${members.length}</div></div>
+      <div class="kpi"><div class="kpi-label">Total sessions</div><div class="kpi-value c-amber">${totalSess}</div></div>
+      <div class="kpi"><div class="kpi-label">Avg per member</div><div class="kpi-value">${members.length>0?(totalSess/members.length).toFixed(1):'—'}</div></div>
+    </div>
+    <div class="search-row">
+      <div class="search-wrap">
+        <i class="ti ti-search"></i>
+        <input class="search-input" placeholder="Search member…" value="${escHtml(S.searchQ)}" oninput="S.searchQ=this.value;S.page=0;renderSessions()">
+      </div>
+      <span style="font-size:11px;color:var(--text-muted)">${filtered.length} members</span>
+    </div>
+    <div class="card">
+      ${members.length===0
+        ? '<div class="empty-state"><i class="ti ti-activity"></i>No active members this month</div>'
+        : `<table><thead><tr><th>#</th><th>Member</th><th>Sessions</th><th style="width:180px">Usage</th></tr></thead><tbody>
+          ${pageItems.map((mem,i) => {
+            const sess = parseInt(d.sessions[mem.name])||0;
+            const pct = Math.round((sess/maxSess)*100);
+            const safeN = mem.name.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+            return `<tr>
+              <td class="t-muted">${S.page*S.PAGE_SIZE+i+1}</td>
+              <td class="t-name">${escHtml(mem.name)}</td>
+              <td><div style="display:flex;align-items:center;gap:6px"><input class="sess-input" type="number" min="0" step="1" value="${sess}" onchange="updateSession('${safeN}',this.value)"><span class="t-muted">sessions</span></div></td>
+              <td><div style="display:flex;align-items:center;gap:8px"><div class="bar-track"><div class="bar-fill" style="width:${pct}%;background:#eda100"></div></div><span class="t-muted" style="font-size:10px;width:20px;text-align:right">${sess}</span></div></td>
+            </tr>`;
+          }).join('')}
+          </tbody></table>
+          ${pages>1?`<div class="pager">
+            <button onclick="S.page--;renderSessions()" ${S.page===0?'disabled':''}>← Prev</button>
+            <span>Page ${S.page+1} of ${pages}</span>
+            <button onclick="S.page++;renderSessions()" ${S.page>=pages-1?'disabled':''}>Next →</button>
+          </div>`:''}`}
+    </div>
+  `;
+}
+
+function updateSession(name, val) {
+  monthData(S.activeMonth).sessions[name] = Math.max(0, parseInt(val)||0);
+  save();
+}
+
+// ── Audit ─────────────────────────────────────────────────
+function renderAudit() {
+  const rows = [...S.months].reverse().map(m => {
+    const d = monthData(m);
+    const active = getActiveMembersArr(m).length;
+    const acts = d.activations.length;
+    const deacts = d.deactivations.length;
+    const sessions = Object.values(d.sessions).reduce((a,b) => a+(parseInt(b)||0), 0);
+    const net = acts - deacts;
+    const avg = active>0 ? (sessions/active).toFixed(1) : '0.0';
+    return {m, active, acts, deacts, sessions, net, avg};
+  });
+  const maxActs = Math.max(...rows.map(r=>r.acts), 1);
+  const maxSess = Math.max(...rows.map(r=>r.sessions), 1);
+
+  document.getElementById('main-content').innerHTML = `
+    <div class="card" style="margin-bottom:14px">
+      <div class="card-head"><span class="card-title">Monthly summary — all periods</span></div>
+      <table>
+        <thead><tr><th>Month</th><th>Active members</th><th>Activations</th><th>Deactivations</th><th>Net change</th><th>Sessions</th><th>Avg sessions</th></tr></thead>
+        <tbody>
+          ${rows.map(r=>`<tr>
+            <td class="t-name">${monthLabel(r.m)}</td>
+            <td style="color:#2a78d6;font-weight:500">${r.active}</td>
+            <td style="color:#1baf7a">+${r.acts}</td>
+            <td style="color:#e34948">−${r.deacts}</td>
+            <td>${r.net>0?`<span style="color:#1baf7a">+${r.net}</span>`:r.net<0?`<span style="color:#e34948">${r.net}</span>`:'<span class="t-muted">—</span>'}</td>
+            <td style="color:#eda100;font-weight:500">${r.sessions}</td>
+            <td class="t-secondary">${r.avg}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>
+    <div class="grid-2">
+      <div class="card">
+        <div class="card-head"><span class="card-title">Activations by month</span></div>
+        <div style="padding:14px 16px">
+          ${[...rows].reverse().map(r=>`<div class="bar-mini">
+            <span class="bar-label">${monthLabel(r.m)}</span>
+            <div class="bar-track"><div class="bar-fill" style="width:${Math.round((r.acts/maxActs)*100)}%;background:#1baf7a"></div></div>
+            <span class="bar-val">${r.acts}</span>
+          </div>`).join('')}
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-head"><span class="card-title">Sessions by month</span></div>
+        <div style="padding:14px 16px">
+          ${[...rows].reverse().map(r=>`<div class="bar-mini">
+            <span class="bar-label">${monthLabel(r.m)}</span>
+            <div class="bar-track"><div class="bar-fill" style="width:${Math.round((r.sessions/maxSess)*100)}%;background:#eda100"></div></div>
+            <span class="bar-val">${r.sessions}</span>
+          </div>`).join('')}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+// ── Modals ────────────────────────────────────────────────
+function showAddModal(type) {
+  const isAct = type === 'activation';
+  document.getElementById('modal-root').innerHTML = `
+    <div class="modal-bg" onclick="if(event.target===this)closeModal()">
+      <div class="modal">
+        <h3>Log ${isAct?'activation':'deactivation'}</h3>
+        <div class="modal-sub">${monthLabel(S.activeMonth)}</div>
+        <div class="form-row"><label>Employee name</label><input id="m-name" placeholder="Full name" autocomplete="off"></div>
+        <div class="form-row"><label>Date</label><input id="m-date" type="date" value="${todayStr()}"></div>
+        <div class="form-row"><label>${isAct?'Notes':'Reason'} (optional)</label><input id="m-notes" placeholder="${isAct?'e.g. new hire, transfer':'e.g. resigned, end of contract'}"></div>
+        <div class="modal-footer">
+          <button onclick="closeModal()">Cancel</button>
+          <button class="btn-primary" onclick="saveEntry('${type}')">Save</button>
+        </div>
+      </div>
+    </div>`;
+  setTimeout(() => document.getElementById('m-name')?.focus(), 50);
+}
+
+function showBulkModal() {
+  document.getElementById('modal-root').innerHTML = `
+    <div class="modal-bg" onclick="if(event.target===this)closeModal()">
+      <div class="modal">
+        <h3>Bulk import</h3>
+        <div class="modal-sub">One name per line, or CSV: Name, Date, Notes</div>
+        <div class="form-row"><label>Paste list</label><textarea id="m-bulk" placeholder="John Smith&#10;Sara Ahmed, 2025-06-01, new hire&#10;Ali Raza"></textarea></div>
+        <div class="form-row"><label>Type</label><select id="m-bulk-type"><option value="activation">Activations</option><option value="deactivation">Deactivations</option></select></div>
+        <div class="form-row"><label>Default date</label><input id="m-bulk-date" type="date" value="${todayStr()}"></div>
+        <div class="modal-footer">
+          <button onclick="closeModal()">Cancel</button>
+          <button class="btn-primary" onclick="saveBulk()">Import</button>
+        </div>
+      </div>
+    </div>`;
+  setTimeout(() => document.getElementById('m-bulk')?.focus(), 50);
+}
+
+function showBulkSessionModal() {
+  document.getElementById('modal-root').innerHTML = `
+    <div class="modal-bg" onclick="if(event.target===this)closeModal()">
+      <div class="modal">
+        <h3>Paste session counts</h3>
+        <div class="modal-sub">${monthLabel(S.activeMonth)} — format: Name, Sessions</div>
+        <div class="form-row"><label>Paste data</label><textarea id="m-sess" placeholder="John Smith, 8&#10;Sara Ahmed, 12&#10;Ali Raza, 4"></textarea></div>
+        <div class="modal-footer">
+          <button onclick="closeModal()">Cancel</button>
+          <button class="btn-primary" onclick="saveBulkSessions()">Import</button>
+        </div>
+      </div>
+    </div>`;
+  setTimeout(() => document.getElementById('m-sess')?.focus(), 50);
+}
+
+function closeModal() { document.getElementById('modal-root').innerHTML = ''; }
+
+function saveEntry(type) {
+  const name = document.getElementById('m-name').value.trim();
+  if (!name) { document.getElementById('m-name').style.borderColor = '#e34948'; return; }
+  const date = document.getElementById('m-date').value;
+  const notes = document.getElementById('m-notes').value.trim();
+  const key = type==='activation' ? 'activations' : 'deactivations';
+  monthData(S.activeMonth)[key].push({name, date, notes});
+  save(); closeModal();
+  toast(`${type==='activation'?'Activation':'Deactivation'} logged for ${name}`);
+  render();
+}
+
+function saveBulk() {
+  const raw = document.getElementById('m-bulk').value.trim();
+  const type = document.getElementById('m-bulk-type').value;
+  const defDate = document.getElementById('m-bulk-date').value;
+  if (!raw) return;
+  const key = type==='activation' ? 'activations' : 'deactivations';
+  const d = monthData(S.activeMonth);
+  let count = 0;
+  for (const line of raw.split('\n').map(l=>l.trim()).filter(Boolean)) {
+    const [name, date, ...rest] = line.split(',').map(p=>p.trim());
+    if (!name) continue;
+    d[key].push({name, date: date||defDate, notes: rest.join(', ')});
+    count++;
+  }
+  save(); closeModal();
+  toast(`Imported ${count} ${type==='activation'?'activations':'deactivations'}`);
+  render();
+}
+
+function saveBulkSessions() {
+  const raw = document.getElementById('m-sess').value.trim();
+  if (!raw) return;
+  const d = monthData(S.activeMonth);
+  let count = 0;
+  for (const line of raw.split('\n').map(l=>l.trim()).filter(Boolean)) {
+    const parts = line.split(',').map(p=>p.trim());
+    const name = parts[0]; const sess = parseInt(parts[1])||0;
+    if (!name) continue;
+    d.sessions[name] = sess; count++;
+  }
+  save(); closeModal();
+  toast(`Updated sessions for ${count} members`);
+  render();
+}
+
+function deleteEntry(type, idx) {
+  const key = type==='activation' ? 'activations' : 'deactivations';
+  const d = monthData(S.activeMonth);
+  const name = d[key][idx]?.name;
+  d[key].splice(idx, 1);
+  save();
+  toast(`Removed ${name}`);
+  render();
+}
+
+// ── Utilities ─────────────────────────────────────────────
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg; el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 2200);
+}
+
+function todayStr() { return new Date().toISOString().slice(0,10); }
+
+function escHtml(s) {
+  if (!s) return '';
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── Boot ──────────────────────────────────────────────────
+if (sessionStorage.getItem(SESSION_KEY) === '1') {
+  document.getElementById('login-screen').style.display = 'none';
+  document.getElementById('app').style.display = 'grid';
+  init();
+}
+
+document.getElementById('pw-input')?.addEventListener('keydown', e => {
+  if (e.key === 'Enter') tryLogin();
+});
+</script>
+</body>
+</html>
