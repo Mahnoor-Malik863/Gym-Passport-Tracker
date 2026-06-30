@@ -963,6 +963,33 @@ function renderBudget() {
   },50);
 }
 
+// Moves all session data from one month to another (overwrites destination sessions)
+function moveMonthSessions() {
+  const from = document.getElementById('fix-from').value;
+  const to = document.getElementById('fix-to').value;
+  if (from === to) { toast('Choose two different months'); return; }
+  const fromData = md(from);
+  const toData = md(to);
+  const count = Object.keys(fromData.sessions).length;
+  if (count === 0) { toast(`No session data in ${ml(from)} to move`); return; }
+  toData.sessions = {...fromData.sessions};
+  fromData.sessions = {};
+  saveData();
+  toast(`Moved ${count} session records from ${ml(from)} to ${ml(to)}`);
+  render();
+}
+
+function clearMonthSessions() {
+  const from = document.getElementById('fix-from').value;
+  const d = md(from);
+  const count = Object.keys(d.sessions).length;
+  if (count === 0) { toast(`No session data in ${ml(from)} to clear`); return; }
+  d.sessions = {};
+  saveData();
+  toast(`Cleared ${count} session records from ${ml(from)}`);
+  render();
+}
+
 function renderAudit() {
   const rows=[...S.months].reverse().map(m=>{
     const d=md(m);
@@ -988,6 +1015,24 @@ function renderAudit() {
         ${variants.map(group=>`<div style="font-size:12px;padding:6px 0;border-bottom:1px solid var(--border)">${group.map(n=>`<span class="badge badge-amber" style="margin-right:6px">${esc(n)}</span>`).join('')}</div>`).join('')}
       </div>
     </div>`:''}
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-head"><span class="card-title">Fix session data for a month</span></div>
+      <div style="padding:14px 18px;font-size:12px;color:var(--text-2)">
+        <div style="margin-bottom:10px">Move sessions from one month to another, or clear a month's sessions entirely — useful if a CSV was imported into the wrong month.</div>
+        <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
+          <div>
+            <label style="display:block;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--text-2);margin-bottom:5px">From</label>
+            <select id="fix-from" style="padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:12px;background:var(--surface-2)">${S.months.map(m=>`<option value="${m}">${ml(m)}</option>`).join('')}</select>
+          </div>
+          <div>
+            <label style="display:block;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--text-2);margin-bottom:5px">To</label>
+            <select id="fix-to" style="padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:12px;background:var(--surface-2)">${S.months.map(m=>`<option value="${m}">${ml(m)}</option>`).join('')}</select>
+          </div>
+          <button class="btn" onclick="moveMonthSessions()"><i class="ti ti-arrow-right"></i>Move sessions</button>
+          <button class="btn" style="color:var(--red);border-color:#fecaca" onclick="clearMonthSessions()"><i class="ti ti-trash"></i>Clear sessions in "From"</button>
+        </div>
+      </div>
+    </div>
     <div class="card" style="margin-bottom:16px">
       <div class="card-head"><span class="card-title">Month-by-month summary</span></div>
       <table>
@@ -1084,10 +1129,16 @@ function showCsvSessionModal() {
     <div class="modal-bg" onclick="if(event.target===this)closeModal()">
       <div class="modal">
         <h3>Upload Gym Passport CSV</h3>
-        <div class="modal-sub">${ml(S.activeMonth)} — export from portal.gympassport.pk with the date range set to this month. "Total Check-ins" in that export is read as this month's session count.</div>
+        <div class="modal-sub">Export from portal.gympassport.pk with the date range set to the month you're importing. "Total Check-ins" in that export is read as that month's session count.</div>
         <div class="form-row">
           <label>CSV file</label>
           <input id="m-csv-file" type="file" accept=".csv,text/csv">
+        </div>
+        <div class="form-row">
+          <label>Import into month</label>
+          <select id="m-csv-month">
+            ${S.months.map(m=>`<option value="${m}" ${m===S.activeMonth?'selected':''}>${ml(m)}</option>`).join('')}
+          </select>
         </div>
         <div id="m-csv-preview" style="font-size:11px;color:var(--text-3);margin-top:4px"></div>
         <div class="modal-footer">
@@ -1099,11 +1150,26 @@ function showCsvSessionModal() {
   document.getElementById('m-csv-file').addEventListener('change', e=>{
     const f=e.target.files[0];
     if(!f)return;
+    // try to auto-detect target month from filename, e.g. employees-2026-03-01.csv
+    const fnMatch = f.name.match(/(\d{4})-(\d{2})-\d{2}/);
+    let detectedMonth = null;
+    if (fnMatch) {
+      const candidate = `${fnMatch[1]}-${fnMatch[2]}`;
+      if (S.months.includes(candidate)) detectedMonth = candidate;
+    }
     const reader=new FileReader();
     reader.onload=ev=>{
       S._csvText=ev.target.result;
       const parsed=parseGymPassportCsv(S._csvText);
-      document.getElementById('m-csv-preview').textContent = `Found ${parsed.length} employee rows in this file.`;
+      const sel = document.getElementById('m-csv-month');
+      let preview = `Found ${parsed.length} employee rows in this file.`;
+      if (detectedMonth) {
+        sel.value = detectedMonth;
+        preview += ` Detected month from filename: ${ml(detectedMonth)} — double check before importing.`;
+      } else {
+        preview += ` Could not detect month from filename — confirm the target month above before importing.`;
+      }
+      document.getElementById('m-csv-preview').textContent = preview;
     };
     reader.readAsText(f);
   });
@@ -1144,16 +1210,18 @@ function splitCsvLine(line) {
 
 function saveCsvSessions() {
   if (!S._csvText) { toast('Choose a CSV file first'); return; }
+  const targetMonth = document.getElementById('m-csv-month').value;
   const rows=parseGymPassportCsv(S._csvText);
   if (rows.length===0) { toast('Could not read employee/check-in columns from this file'); return; }
-  const d=md(S.activeMonth);
+  const d=md(targetMonth);
   let count=0;
   for (const r of rows) {
     d.sessions[r.name]=r.checkins;
     count++;
   }
   saveData(); closeModal(); S._csvText=null;
-  toast(`Imported sessions for ${count} employees from CSV`);
+  S.activeMonth = targetMonth;
+  toast(`Imported sessions for ${count} employees into ${ml(targetMonth)}`);
   render();
 }
 
