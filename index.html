@@ -356,6 +356,16 @@ function loadData() {
       if (!S.months.includes(realCurrent[i])) S.months.push(realCurrent[i]);
     }
   }
+
+  // Drop any month earlier than March 2026 — tracking does not go back further than this
+  const FLOOR = '2026-03';
+  const droppedMonths = S.months.filter(m => m < FLOOR);
+  if (droppedMonths.length > 0) {
+    S.months = S.months.filter(m => m >= FLOOR);
+    for (const m of droppedMonths) delete S.data[m];
+    saveData();
+  }
+
   S.activeMonth = S.months[S.months.length-1];
 }
 function saveData() {
