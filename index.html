@@ -223,6 +223,7 @@ tr:hover .del-btn{opacity:1}
     <button class="sb-item" onclick="nav('employee')" id="nav-employee"><i class="ti ti-user-search"></i>Employee lookup</button>
     <button class="sb-item" onclick="nav('sessions')" id="nav-sessions"><i class="ti ti-activity"></i>Sessions</button>
     <button class="sb-item" onclick="nav('policy')" id="nav-policy"><i class="ti ti-shield-check"></i>Policy compliance</button>
+    <button class="sb-item" onclick="nav('budget')" id="nav-budget"><i class="ti ti-receipt"></i>Budget & invoices</button>
     <button class="sb-item" onclick="nav('audit')" id="nav-audit"><i class="ti ti-clipboard-list"></i>Audit log</button>
     <div class="sb-section">Month</div>
     <div class="sb-months" id="sb-months"></div>
@@ -262,14 +263,28 @@ const SK = 'gp_auth';
 const DK = 'gp_data_v3';
 const MO = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const PAGE = 15;
+const MIN_SESSIONS = 6; // minimum monthly sessions to meet policy requirement
+
+// builds a contiguous month list from 2025-03 up to (and including) the real current month
+function buildDefaultMonths() {
+  const months = [];
+  let y = 2025, mo = 3; // start March 2025
+  const now = new Date();
+  const endY = now.getFullYear(), endMo = now.getMonth()+1;
+  while (y < endY || (y === endY && mo <= endMo)) {
+    months.push(`${y}-${String(mo).padStart(2,'0')}`);
+    mo++; if (mo>12){mo=1;y++;}
+  }
+  return months;
+}
 
 // ═══════════════════════════════════════════════════════════
 //  STATE
 // ═══════════════════════════════════════════════════════════
 let S = {
-  months: ['2025-03','2025-04','2025-05','2025-06'],
-  activeMonth: '2025-06',
-  // data[month] = { activations:[{name,date,notes}], deactivations:[{name,date,reason}], sessions:{name:n} }
+  months: buildDefaultMonths(),
+  activeMonth: '',
+  // data[month] = { activations:[{name,date,notes}], deactivations:[{name,date,reason}], sessions:{name:n}, invoice:{filename,dataUrl,amount} }
   data: {},
   view: 'overview',
   vtab: 'activations',
@@ -277,6 +292,7 @@ let S = {
   page: 0,
   empSearch: ''
 };
+S.activeMonth = S.months[S.months.length-1];
 
 // ═══════════════════════════════════════════════════════════
 //  AUTH
@@ -301,19 +317,37 @@ function logout() { sessionStorage.removeItem(SK); location.reload(); }
 function loadData() {
   try {
     const r = localStorage.getItem(DK);
-    if (r) { const p = JSON.parse(r); S.months = p.months||S.months; S.data = p.data||{}; }
+    if (r) {
+      const p = JSON.parse(r);
+      S.months = p.months || S.months;
+      S.data = p.data || {};
+    }
   } catch(e){}
+  // extend months list if there's a gap to the real current month (handles old saves stuck in the past)
+  const realCurrent = buildDefaultMonths();
+  const last = S.months[S.months.length-1];
+  const lastRealIdx = realCurrent.indexOf(last);
+  if (lastRealIdx >= 0 && lastRealIdx < realCurrent.length-1) {
+    for (let i=lastRealIdx+1; i<realCurrent.length; i++) {
+      if (!S.months.includes(realCurrent[i])) S.months.push(realCurrent[i]);
+    }
+  }
   S.activeMonth = S.months[S.months.length-1];
 }
 function saveData() {
-  localStorage.setItem(DK, JSON.stringify({months:S.months, data:S.data}));
+  try {
+    localStorage.setItem(DK, JSON.stringify({months:S.months, data:S.data}));
+  } catch(e) {
+    toast('Storage limit reached — try a smaller invoice PDF, or delete an old one first');
+  }
 }
 
 // ═══════════════════════════════════════════════════════════
 //  DATA HELPERS
 // ═══════════════════════════════════════════════════════════
 function md(m) {
-  if (!S.data[m]) S.data[m]={activations:[],deactivations:[],sessions:{}};
+  if (!S.data[m]) S.data[m]={activations:[],deactivations:[],sessions:{},invoice:null};
+  if (!S.data[m].invoice) S.data[m].invoice = null;
   return S.data[m];
 }
 
@@ -473,14 +507,15 @@ function renderTopbar() {
   const acts = {
     overview:`<button class="btn" onclick="showBulkModal()"><i class="ti ti-upload"></i>Bulk import</button><button class="btn accent" onclick="showAddModal('activation')"><i class="ti ti-user-plus"></i>Activate member</button>`,
     members:`<button class="btn" onclick="showBulkModal()"><i class="ti ti-upload"></i>Bulk import</button><button class="btn accent" onclick="showAddModal(S.vtab==='activations'?'activation':'deactivation')"><i class="ti ti-plus"></i>Add entry</button>`,
-    sessions:`<button class="btn" onclick="showBulkSessionModal()"><i class="ti ti-upload"></i>Paste sessions</button>`,
+    sessions:`<button class="btn accent" onclick="showCsvSessionModal()"><i class="ti ti-file-upload"></i>Upload Gym Passport CSV</button><button class="btn" onclick="showBulkSessionModal()"><i class="ti ti-upload"></i>Paste sessions</button>`,
+    budget:`<button class="btn accent" onclick="showInvoiceModal()"><i class="ti ti-file-invoice"></i>Upload invoice</button>`,
     employee:'',policy:'',audit:''
   };
   document.getElementById('topbar-actions').innerHTML=acts[S.view]||'';
 }
 
 function renderContent() {
-  ({overview:renderOverview,members:renderMembers,employee:renderEmployee,sessions:renderSessions,policy:renderPolicy,audit:renderAudit}[S.view]||renderOverview)();
+  ({overview:renderOverview,members:renderMembers,employee:renderEmployee,sessions:renderSessions,policy:renderPolicy,budget:renderBudget,audit:renderAudit}[S.view]||renderOverview)();
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -748,31 +783,33 @@ function renderSessions() {
   const items=filtered.slice(S.page*PAGE,(S.page+1)*PAGE);
   const totalSess=members.reduce((a,name)=>a+(parseInt(d.sessions[name])||0),0);
   const maxSess=Math.max(...members.map(name=>parseInt(d.sessions[name])||0),1);
-  const zeroSess=members.filter(name=>!(parseInt(d.sessions[name])>0)).length;
+  const belowMin=members.filter(name=>(parseInt(d.sessions[name])||0)<MIN_SESSIONS).length;
 
   document.getElementById('main-content').innerHTML=`
     <div class="kpi-row" style="grid-template-columns:repeat(4,1fr);margin-bottom:16px">
       <div class="kpi"><div class="kpi-label">Active members</div><div class="kpi-value" style="color:var(--blue)">${members.length}</div></div>
       <div class="kpi"><div class="kpi-label">Total sessions</div><div class="kpi-value" style="color:var(--amber)">${totalSess}</div></div>
       <div class="kpi"><div class="kpi-label">Avg per member</div><div class="kpi-value">${members.length>0?(totalSess/members.length).toFixed(1):'—'}</div></div>
-      <div class="kpi"><div class="kpi-label">Zero sessions</div><div class="kpi-value" style="color:${zeroSess>0?'var(--red)':'var(--green)'}">${zeroSess}</div></div>
+      <div class="kpi"><div class="kpi-label">Below ${MIN_SESSIONS}/month</div><div class="kpi-value" style="color:${belowMin>0?'var(--red)':'var(--green)'}">${belowMin}</div></div>
     </div>
     <div class="search-row">
       <div class="search-wrap"><i class="ti ti-search"></i><input class="search-input" placeholder="Search member…" value="${esc(S.q)}" oninput="S.q=this.value;S.page=0;renderSessions()"></div>
-      <span class="count-label">${filtered.length} of ${members.length} members</span>
+      <span class="count-label">${filtered.length} of ${members.length} members · minimum requirement: ${MIN_SESSIONS} sessions/month</span>
     </div>
     <div class="card">
       ${members.length===0?'<div class="empty"><i class="ti ti-activity"></i>No active members this month</div>':`
-      <table><thead><tr><th>#</th><th>Member</th><th>Sessions logged</th><th style="width:200px">Usage</th></tr></thead><tbody>
+      <table><thead><tr><th>#</th><th>Member</th><th>Sessions logged</th><th style="width:180px">Usage</th><th>Status</th></tr></thead><tbody>
         ${items.map((name,i)=>{
           const sess=parseInt(d.sessions[name])||0;
           const pct=Math.round((sess/maxSess)*100);
           const sn=name.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+          const meetsMin=sess>=MIN_SESSIONS;
           return`<tr>
             <td class="t-dim">${S.page*PAGE+i+1}</td>
             <td class="t-name" style="cursor:pointer;color:var(--accent)" onclick="viewEmployee('${esc(name)}')">${esc(name)}</td>
             <td><div style="display:flex;align-items:center;gap:8px"><input class="sess-input" type="number" min="0" step="1" value="${sess}" onchange="updateSess('${sn}',this.value)"><span class="t-dim">sessions</span></div></td>
-            <td><div class="usage-bar"><div class="bar-track"><div class="bar-fill" style="width:${pct}%;background:var(--amber)"></div></div><span class="t-dim" style="font-size:10px;width:22px;text-align:right">${sess}</span></div></td>
+            <td><div class="usage-bar"><div class="bar-track"><div class="bar-fill" style="width:${pct}%;background:${meetsMin?'var(--green)':'var(--red)'}"></div></div><span class="t-dim" style="font-size:10px;width:22px;text-align:right">${sess}</span></div></td>
+            <td>${meetsMin?'<span class="badge badge-green">Meets min</span>':`<span class="badge badge-red">Below min</span>`}</td>
           </tr>`;
         }).join('')}
       </tbody></table>
@@ -791,17 +828,20 @@ function updateSess(name,val) {
 // ═══════════════════════════════════════════════════════════
 function renderPolicy() {
   const flags=policyFlags();
-  const zeroByMonth=S.months.map(m=>{
-    const active=activeArr(m);
-    const d=md(m);
-    return{month:m,zero:active.filter(name=>!(parseInt(d.sessions[name])>0)),total:active.length};
+  const m=S.activeMonth, d=md(m);
+  const currentBelowMin=activeArr(m).filter(name=>(parseInt(d.sessions[name])||0)<MIN_SESSIONS);
+  const belowMinByMonth=S.months.map(mo=>{
+    const active=activeArr(mo);
+    const dm=md(mo);
+    return{month:mo,below:active.filter(name=>(parseInt(dm.sessions[name])||0)<MIN_SESSIONS),total:active.length};
   });
 
   document.getElementById('main-content').innerHTML=`
-    <div class="kpi-row" style="grid-template-columns:repeat(3,1fr);margin-bottom:20px">
-      <div class="kpi"><div class="kpi-label">Policy flags</div><div class="kpi-value" style="color:${flags.length>0?'var(--red)':'var(--green)'}">${flags.length}</div><div class="kpi-delta">${flags.length>0?'<span class="down">Employees deactivated 2+ times</span>':'<span class="up">All clear</span>'}</div></div>
+    <div class="kpi-row" style="grid-template-columns:repeat(4,1fr);margin-bottom:20px">
+      <div class="kpi"><div class="kpi-label">Deactivation flags</div><div class="kpi-value" style="color:${flags.length>0?'var(--red)':'var(--green)'}">${flags.length}</div><div class="kpi-delta">${flags.length>0?'<span class="down">Deactivated 2+ times</span>':'<span class="up">All clear</span>'}</div></div>
+      <div class="kpi"><div class="kpi-label">Below min this month</div><div class="kpi-value" style="color:${currentBelowMin.length>0?'var(--red)':'var(--green)'}">${currentBelowMin.length}</div><div class="kpi-delta">${ml(m)}, under ${MIN_SESSIONS}/mo</div></div>
       <div class="kpi"><div class="kpi-label">Total employees ever</div><div class="kpi-value">${allEmployees().length}</div></div>
-      <div class="kpi"><div class="kpi-label">Currently active</div><div class="kpi-value" style="color:var(--blue)">${activeArr(S.activeMonth).length}</div></div>
+      <div class="kpi"><div class="kpi-label">Currently active</div><div class="kpi-value" style="color:var(--blue)">${activeArr(m).length}</div></div>
     </div>
 
     <div class="card" style="margin-bottom:16px">
@@ -821,17 +861,36 @@ function renderPolicy() {
       </div>
     </div>
 
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-head"><span class="card-title">⚠️ Below minimum sessions — ${ml(m)}</span><span class="card-sub">Under ${MIN_SESSIONS} sessions this month</span></div>
+      <div style="padding:16px">
+        ${currentBelowMin.length===0
+          ?`<div class="empty" style="padding:20px"><i class="ti ti-shield-check" style="color:var(--green)"></i>Every active member met the ${MIN_SESSIONS}-session minimum this month.</div>`
+          :currentBelowMin.map(name=>{
+            const sess=parseInt(d.sessions[name])||0;
+            return`<div class="flag-row">
+              <i class="ti ti-alert-triangle flag-icon"></i>
+              <div style="flex:1">
+                <div class="flag-name" style="cursor:pointer;color:var(--accent)" onclick="viewEmployee('${esc(name)}')">${esc(name)}</div>
+                <div class="flag-detail">${sess} session${sess===1?'':'s'} logged in ${ml(m)} — ${MIN_SESSIONS-sess} short of minimum</div>
+              </div>
+              <button class="btn" style="font-size:11px" onclick="viewEmployee('${esc(name)}')"><i class="ti ti-eye"></i>View history</button>
+            </div>`;
+          }).join('')}
+      </div>
+    </div>
+
     <div class="card">
-      <div class="card-head"><span class="card-title">Members with zero sessions by month</span><span class="card-sub">(Active but not using the benefit)</span></div>
+      <div class="card-head"><span class="card-title">Below-minimum trend by month</span><span class="card-sub">(Active but under ${MIN_SESSIONS} sessions)</span></div>
       <table>
-        <thead><tr><th>Month</th><th>Active members</th><th>Zero sessions</th><th>Usage rate</th></tr></thead>
+        <thead><tr><th>Month</th><th>Active members</th><th>Below minimum</th><th>Compliance rate</th></tr></thead>
         <tbody>
-          ${zeroByMonth.map(r=>{
-            const rate=r.total>0?Math.round(((r.total-r.zero)/r.total)*100):0;
+          ${belowMinByMonth.map(r=>{
+            const rate=r.total>0?Math.round(((r.total-r.below.length)/r.total)*100):0;
             return`<tr>
-              <td class="t-name">${ml(r.month)}</td>
+              <td class="t-name" style="cursor:pointer;color:var(--accent)" onclick="switchMonth('${r.month}');nav('policy')">${ml(r.month)}</td>
               <td>${r.total}</td>
-              <td style="color:${r.zero>0?'var(--red)':'var(--green)'}">${r.zero}</td>
+              <td style="color:${r.below.length>0?'var(--red)':'var(--green)'}">${r.below.length}</td>
               <td>
                 <div class="usage-bar">
                   <div class="bar-track" style="min-width:80px"><div class="bar-fill" style="width:${rate}%;background:${rate>70?'var(--green)':rate>40?'var(--amber)':'var(--red)'}"></div></div>
@@ -849,6 +908,61 @@ function renderPolicy() {
 // ═══════════════════════════════════════════════════════════
 //  AUDIT LOG
 // ═══════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════
+//  BUDGET & INVOICES
+// ═══════════════════════════════════════════════════════════
+function renderBudget() {
+  const rows = S.months.map(m=>({m, inv: md(m).invoice}));
+  const totalSpend = rows.reduce((a,r)=>a+(r.inv&&r.inv.amount?r.inv.amount:0),0);
+  const monthsWithInvoice = rows.filter(r=>r.inv).length;
+  const avgSpend = monthsWithInvoice>0 ? Math.round(totalSpend/monthsWithInvoice) : 0;
+  const cLabels = S.months.map(ml);
+  const cAmounts = S.months.map(mo => (md(mo).invoice && md(mo).invoice.amount) || 0);
+
+  document.getElementById('main-content').innerHTML=`
+    <div class="kpi-row" style="grid-template-columns:repeat(3,1fr);margin-bottom:20px">
+      <div class="kpi"><div class="kpi-label">Total spend logged</div><div class="kpi-value" style="color:var(--accent)">PKR ${totalSpend.toLocaleString()}</div></div>
+      <div class="kpi"><div class="kpi-label">Avg monthly spend</div><div class="kpi-value">PKR ${avgSpend.toLocaleString()}</div></div>
+      <div class="kpi"><div class="kpi-label">Invoices uploaded</div><div class="kpi-value" style="color:var(--blue)">${monthsWithInvoice} / ${S.months.length}</div></div>
+    </div>
+
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-head"><span class="card-title">Monthly spend</span></div>
+      <div style="padding:16px">
+        <div class="chart-wrap" style="height:180px"><canvas id="ch-budget"></canvas></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><span class="card-title">Invoices by month</span></div>
+      <table>
+        <thead><tr><th>Month</th><th>Amount</th><th>Invoice</th><th></th></tr></thead>
+        <tbody>
+          ${[...rows].reverse().map(r=>`<tr>
+            <td class="t-name">${ml(r.m)}</td>
+            <td>${r.inv&&r.inv.amount?`PKR ${r.inv.amount.toLocaleString()}`:'<span class="t-dim">—</span>'}</td>
+            <td>${r.inv&&r.inv.dataUrl?`<a href="${r.inv.dataUrl}" download="${esc(r.inv.filename)}" style="color:var(--accent);font-size:12px"><i class="ti ti-file-type-pdf"></i> ${esc(r.inv.filename)}</a>`:'<span class="t-dim">No file</span>'}</td>
+            <td style="display:flex;gap:6px">
+              <button class="btn" style="padding:4px 10px;font-size:11px" onclick="switchMonth('${r.m}');showInvoiceModal()">${r.inv?'Edit':'Upload'}</button>
+              ${r.inv?`<button class="del-btn" style="opacity:1" onclick="deleteInvoice('${r.m}')"><i class="ti ti-trash"></i></button>`:''}
+            </td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+
+  setTimeout(()=>{
+    const ctx=document.getElementById('ch-budget');
+    if(!ctx)return;
+    new Chart(ctx,{type:'bar',data:{labels:cLabels,datasets:[{label:'Spend',data:cAmounts,backgroundColor:'#6c63ff',borderRadius:5,barPercentage:.5}]},options:{
+      responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>'PKR '+ctx.parsed.y.toLocaleString()}}},
+      scales:{x:{ticks:{font:{size:10}},grid:{display:false}},y:{ticks:{font:{size:10},callback:v=>v.toLocaleString()},beginAtZero:true,grid:{color:'rgba(0,0,0,.04)'}}}
+    }});
+  },50);
+}
+
 function renderAudit() {
   const rows=[...S.months].reverse().map(m=>{
     const d=md(m);
@@ -962,6 +1076,137 @@ function showBulkSessionModal() {
       </div>
     </div>`;
   setTimeout(()=>document.getElementById('m-sess')?.focus(),50);
+}
+
+// ── Gym Passport CSV import (Emp ID, Employee, Email, Password, Business Unit, Total Check-ins, Status) ──
+function showCsvSessionModal() {
+  document.getElementById('modal-root').innerHTML=`
+    <div class="modal-bg" onclick="if(event.target===this)closeModal()">
+      <div class="modal">
+        <h3>Upload Gym Passport CSV</h3>
+        <div class="modal-sub">${ml(S.activeMonth)} — export from portal.gympassport.pk with the date range set to this month. "Total Check-ins" in that export is read as this month's session count.</div>
+        <div class="form-row">
+          <label>CSV file</label>
+          <input id="m-csv-file" type="file" accept=".csv,text/csv">
+        </div>
+        <div id="m-csv-preview" style="font-size:11px;color:var(--text-3);margin-top:4px"></div>
+        <div class="modal-footer">
+          <button onclick="closeModal()">Cancel</button>
+          <button class="btn-accent" onclick="saveCsvSessions()">Import</button>
+        </div>
+      </div>
+    </div>`;
+  document.getElementById('m-csv-file').addEventListener('change', e=>{
+    const f=e.target.files[0];
+    if(!f)return;
+    const reader=new FileReader();
+    reader.onload=ev=>{
+      S._csvText=ev.target.result;
+      const parsed=parseGymPassportCsv(S._csvText);
+      document.getElementById('m-csv-preview').textContent = `Found ${parsed.length} employee rows in this file.`;
+    };
+    reader.readAsText(f);
+  });
+}
+
+// Parses the Gym Passport employee CSV export. Tolerant of column order via header matching.
+function parseGymPassportCsv(text) {
+  const lines = text.split(/\r?\n/).filter(l=>l.trim().length>0);
+  if (lines.length===0) return [];
+  const headers = splitCsvLine(lines[0]).map(h=>h.trim().toLowerCase());
+  const nameIdx = headers.findIndex(h=>h.includes('employee')&&!h.includes('id')&&!h.includes('email'));
+  const chkIdx = headers.findIndex(h=>h.includes('check'));
+  const statusIdx = headers.findIndex(h=>h.includes('status'));
+  if (nameIdx===-1 || chkIdx===-1) return [];
+  const rows=[];
+  for (let i=1;i<lines.length;i++) {
+    const cols=splitCsvLine(lines[i]);
+    const name=(cols[nameIdx]||'').trim();
+    if (!name) continue;
+    const checkins=parseInt((cols[chkIdx]||'0').replace(/[^0-9-]/g,''))||0;
+    const status=statusIdx>=0?(cols[statusIdx]||'').trim().toLowerCase():'';
+    rows.push({name, checkins, status});
+  }
+  return rows;
+}
+
+function splitCsvLine(line) {
+  const out=[]; let cur=''; let inQ=false;
+  for (let i=0;i<line.length;i++) {
+    const c=line[i];
+    if (c==='"') { inQ=!inQ; continue; }
+    if (c===',' && !inQ) { out.push(cur); cur=''; continue; }
+    cur+=c;
+  }
+  out.push(cur);
+  return out;
+}
+
+function saveCsvSessions() {
+  if (!S._csvText) { toast('Choose a CSV file first'); return; }
+  const rows=parseGymPassportCsv(S._csvText);
+  if (rows.length===0) { toast('Could not read employee/check-in columns from this file'); return; }
+  const d=md(S.activeMonth);
+  let count=0;
+  for (const r of rows) {
+    d.sessions[r.name]=r.checkins;
+    count++;
+  }
+  saveData(); closeModal(); S._csvText=null;
+  toast(`Imported sessions for ${count} employees from CSV`);
+  render();
+}
+
+// ── Invoice upload ──
+function showInvoiceModal() {
+  const existing = md(S.activeMonth).invoice;
+  document.getElementById('modal-root').innerHTML=`
+    <div class="modal-bg" onclick="if(event.target===this)closeModal()">
+      <div class="modal">
+        <h3>Upload invoice</h3>
+        <div class="modal-sub">${ml(S.activeMonth)}${existing?' — replaces existing invoice':''}</div>
+        <div class="form-row">
+          <label>Invoice PDF</label>
+          <input id="m-inv-file" type="file" accept="application/pdf">
+        </div>
+        <div class="form-row">
+          <label>Invoice amount (PKR)</label>
+          <input id="m-inv-amount" type="number" min="0" step="1" placeholder="e.g. 185000" value="${existing&&existing.amount?existing.amount:''}">
+        </div>
+        <div class="modal-footer">
+          <button onclick="closeModal()">Cancel</button>
+          <button class="btn-accent" onclick="saveInvoice()">Save</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+function saveInvoice() {
+  const amount = parseFloat(document.getElementById('m-inv-amount').value)||0;
+  const fileInput = document.getElementById('m-inv-file');
+  const d = md(S.activeMonth);
+  if (fileInput.files[0] && fileInput.files[0].size > 3*1024*1024) {
+    toast('PDF is over 3MB — try a smaller/compressed file to avoid storage limits');
+    return;
+  }
+  const finish = (dataUrl, filename) => {
+    d.invoice = { filename: filename||(d.invoice&&d.invoice.filename)||'invoice.pdf', dataUrl: dataUrl||(d.invoice&&d.invoice.dataUrl)||null, amount };
+    saveData(); closeModal();
+    toast(`Invoice saved for ${ml(S.activeMonth)}`);
+    render();
+  };
+  if (fileInput.files[0]) {
+    const reader = new FileReader();
+    reader.onload = e => finish(e.target.result, fileInput.files[0].name);
+    reader.readAsDataURL(fileInput.files[0]);
+  } else {
+    finish(null, null);
+  }
+}
+
+function deleteInvoice(m) {
+  md(m).invoice = null;
+  saveData(); toast('Invoice removed'); render();
 }
 
 function closeModal() { document.getElementById('modal-root').innerHTML=''; }
