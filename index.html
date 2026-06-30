@@ -322,21 +322,43 @@ function ml(m) {
   return MO[parseInt(mo)-1]+' '+y;
 }
 
+// Normalize a name for matching purposes — collapses case/spacing differences
+// so "John Smith", " john  smith", "JOHN SMITH" are all treated as the same person
+function nkey(name) {
+  return (name||'').trim().toLowerCase().replace(/\s+/g,' ');
+}
+
 // Returns Set of active employee names as of end of given month
 // Uses cumulative model: carries forward unless deactivated
+// Tracks by normalized key internally, but stores the display name (first-seen spelling)
 function activeSet(upToMonth) {
-  const members = new Set();
+  const members = new Map(); // nkey -> display name
   for (const m of S.months) {
     const d = md(m);
-    for (const a of d.activations) members.add(a.name);
-    for (const a of d.deactivations) members.delete(a.name);
+    for (const a of d.activations) members.set(nkey(a.name), a.name);
+    for (const a of d.deactivations) members.delete(nkey(a.name));
     if (m === upToMonth) break;
   }
-  return members;
+  return new Set(members.values());
 }
 
 function activeArr(m) {
   return [...activeSet(m)].sort((a,b)=>a.localeCompare(b));
+}
+
+// Finds inconsistent spellings/casing of the same person across entries —
+// surfaces these so they can be cleaned up (they break activation/deactivation matching)
+function findNameVariants() {
+  const groups = {};
+  for (const m of S.months) {
+    const d = md(m);
+    for (const a of [...d.activations, ...d.deactivations]) {
+      const k = nkey(a.name);
+      if (!groups[k]) groups[k] = new Set();
+      groups[k].add(a.name);
+    }
+  }
+  return Object.values(groups).filter(s => s.size > 1).map(s => [...s]);
 }
 
 function prevMonth(m) {
@@ -346,40 +368,48 @@ function prevMonth(m) {
 
 // Full history of an employee across all months
 function empHistory(name) {
+  const key = nkey(name);
   const events = [];
   let isActive = false;
   for (const m of S.months) {
     const d = md(m);
-    const act = d.activations.find(a=>a.name===name);
-    const deact = d.deactivations.find(a=>a.name===name);
+    const act = d.activations.find(a=>nkey(a.name)===key);
+    const deact = d.deactivations.find(a=>nkey(a.name)===key);
     if (act) { events.push({month:m,type:'activated',date:act.date,note:act.notes||''}); isActive=true; }
     if (deact) { events.push({month:m,type:'deactivated',date:deact.date,note:deact.reason||deact.notes||''}); isActive=false; }
-    if (!act && !deact && isActive) { events.push({month:m,type:'active',sessions:parseInt(md(m).sessions[name])||0}); }
+    if (!act && !deact && isActive) {
+      // find sessions under any matching spelling for this month
+      const d2 = md(m);
+      let sess = 0;
+      for (const k in d2.sessions) { if (nkey(k)===key) sess = parseInt(d2.sessions[k])||0; }
+      events.push({month:m,type:'active',sessions:sess});
+    }
   }
   return events;
 }
 
-// All unique employee names ever seen
+// All unique employee names ever seen (normalized, displaying first-seen spelling)
 function allEmployees() {
-  const s = new Set();
+  const seen = new Map(); // nkey -> display name
   for (const m of S.months) {
     const d = md(m);
-    d.activations.forEach(a=>s.add(a.name));
-    d.deactivations.forEach(a=>s.add(a.name));
+    [...d.activations, ...d.deactivations].forEach(a => {
+      const k = nkey(a.name);
+      if (!seen.has(k)) seen.set(k, a.name);
+    });
   }
-  return [...s].sort((a,b)=>a.localeCompare(b));
+  return [...seen.values()].sort((a,b)=>a.localeCompare(b));
 }
 
-// Policy: employees deactivated 2+ consecutive months in a row
-// = deactivated in month N and also month N+1 (re-activated and deactivated again)
+// Policy: employees deactivated 2+ times across any months
 function policyFlags() {
   const flags = [];
   const employees = allEmployees();
   for (const name of employees) {
+    const key = nkey(name);
     const hist = empHistory(name);
-    // Find consecutive deactivation pattern: activated → deactivated → activated → deactivated
-    const deactMonths = S.months.filter(m => md(m).deactivations.some(a=>a.name===name));
-    const actCount = S.months.filter(m => md(m).activations.some(a=>a.name===name)).length;
+    const deactMonths = S.months.filter(m => md(m).deactivations.some(a=>nkey(a.name)===key));
+    const actCount = S.months.filter(m => md(m).activations.some(a=>nkey(a.name)===key)).length;
     if (deactMonths.length >= 2) {
       flags.push({name, deactMonths, actCount, hist});
     }
@@ -629,10 +659,11 @@ function renderEmployee() {
       ${filtered.length===0?'<div class="empty"><i class="ti ti-users"></i>No employees found</div>':`
       <table><thead><tr><th>Name</th><th>Current status</th><th>Activations</th><th>Deactivations</th><th>Total sessions</th><th></th></tr></thead><tbody>
         ${filtered.map(name=>{
-          const isActive=activeSet(S.activeMonth).has(name);
-          const actCount=S.months.filter(m=>md(m).activations.some(a=>a.name===name)).length;
-          const deactCount=S.months.filter(m=>md(m).deactivations.some(a=>a.name===name)).length;
-          const totalSess=S.months.reduce((sum,m)=>sum+(parseInt(md(m).sessions[name])||0),0);
+          const key=nkey(name);
+          const isActive=[...activeSet(S.activeMonth)].some(n=>nkey(n)===key);
+          const actCount=S.months.filter(m=>md(m).activations.some(a=>nkey(a.name)===key)).length;
+          const deactCount=S.months.filter(m=>md(m).deactivations.some(a=>nkey(a.name)===key)).length;
+          const totalSess=S.months.reduce((sum,m)=>{const d=md(m);let s=0;for(const k in d.sessions){if(nkey(k)===key)s=parseInt(d.sessions[k])||0;}return sum+s;},0);
           const flagged=deactCount>=2;
           return`<tr>
             <td class="t-name" style="cursor:pointer;color:var(--accent)" onclick="viewEmployee('${esc(name)}')">${esc(name)}${flagged?'<span class="badge badge-red" style="margin-left:8px">Flagged</span>':''}</td>
@@ -654,12 +685,13 @@ function viewEmployee(name) {
 }
 
 function renderEmpProfile(name) {
+  const key=nkey(name);
   const hist=empHistory(name);
-  const isActive=activeSet(S.activeMonth).has(name);
-  const actCount=S.months.filter(m=>md(m).activations.some(a=>a.name===name)).length;
-  const deactCount=S.months.filter(m=>md(m).deactivations.some(a=>a.name===name)).length;
-  const totalSess=S.months.reduce((sum,m)=>sum+(parseInt(md(m).sessions[name])||0),0);
-  const activeMonths=S.months.filter(m=>activeSet(m).has(name)).length;
+  const isActive=[...activeSet(S.activeMonth)].some(n=>nkey(n)===key);
+  const actCount=S.months.filter(m=>md(m).activations.some(a=>nkey(a.name)===key)).length;
+  const deactCount=S.months.filter(m=>md(m).deactivations.some(a=>nkey(a.name)===key)).length;
+  const totalSess=S.months.reduce((sum,m)=>{const d=md(m);let s=0;for(const k in d.sessions){if(nkey(k)===key)s=parseInt(d.sessions[k])||0;}return sum+s;},0);
+  const activeMonths=S.months.filter(m=>[...activeSet(m)].some(n=>nkey(n)===key)).length;
   const flagged=deactCount>=2;
 
   document.getElementById('main-content').innerHTML=`
@@ -829,8 +861,19 @@ function renderAudit() {
   });
   const maxActs=Math.max(...rows.map(r=>r.acts),1);
   const maxSess=Math.max(...rows.map(r=>r.sess),1);
+  const variants=findNameVariants();
 
   document.getElementById('main-content').innerHTML=`
+    ${variants.length>0?`
+    <div class="card" style="margin-bottom:16px;border-color:#fecaca">
+      <div class="card-head" style="background:#fff9f9">
+        <span class="card-title" style="color:var(--red)"><i class="ti ti-alert-triangle"></i> ${variants.length} possible duplicate name${variants.length>1?'s':''} found</span>
+      </div>
+      <div style="padding:14px 18px">
+        <div style="font-size:11px;color:var(--text-2);margin-bottom:10px">These spellings were treated as the same person automatically, but check they're not actually different people — or fix the spelling in your entries to keep data clean going forward.</div>
+        ${variants.map(group=>`<div style="font-size:12px;padding:6px 0;border-bottom:1px solid var(--border)">${group.map(n=>`<span class="badge badge-amber" style="margin-right:6px">${esc(n)}</span>`).join('')}</div>`).join('')}
+      </div>
+    </div>`:''}
     <div class="card" style="margin-bottom:16px">
       <div class="card-head"><span class="card-title">Month-by-month summary</span></div>
       <table>
