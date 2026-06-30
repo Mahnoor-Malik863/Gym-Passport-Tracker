@@ -265,17 +265,24 @@ const MO = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','D
 const PAGE = 15;
 const MIN_SESSIONS = 6; // minimum monthly sessions to meet policy requirement
 
-// builds a contiguous month list from 2025-03 up to (and including) the real current month
+// builds a contiguous month list from 2026-03 up to (and including) the real current month
 function buildDefaultMonths() {
   const months = [];
-  let y = 2025, mo = 3; // start March 2025
+  let y = 2026, mo = 3; // start March 2026
   const now = new Date();
   const endY = now.getFullYear(), endMo = now.getMonth()+1;
   while (y < endY || (y === endY && mo <= endMo)) {
     months.push(`${y}-${String(mo).padStart(2,'0')}`);
     mo++; if (mo>12){mo=1;y++;}
   }
+  if (months.length === 0) months.push(`${y}-${String(mo).padStart(2,'0')}`); // safety: always at least one month
   return months;
+}
+
+// Shifts a YYYY-MM string forward by N years
+function shiftYear(monthKey, years) {
+  const [y,mo] = monthKey.split('-').map(Number);
+  return `${y+years}-${String(mo).padStart(2,'0')}`;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -323,6 +330,23 @@ function loadData() {
       S.data = p.data || {};
     }
   } catch(e){}
+
+  // One-time migration: earlier versions of this tracker mistakenly started in March 2025.
+  // Tracking actually began March 2026 — shift any 2025-labeled months forward one year,
+  // keeping all activation/deactivation/session/invoice data intact under the corrected month key.
+  const hasOldYear = S.months.some(m => m.startsWith('2025-'));
+  if (hasOldYear) {
+    const newMonths = S.months.map(m => m.startsWith('2025-') ? shiftYear(m,1) : m);
+    const newData = {};
+    for (const m of S.months) {
+      const newKey = m.startsWith('2025-') ? shiftYear(m,1) : m;
+      newData[newKey] = S.data[m];
+    }
+    S.months = [...new Set(newMonths)].sort();
+    S.data = newData;
+    saveData();
+  }
+
   // extend months list if there's a gap to the real current month (handles old saves stuck in the past)
   const realCurrent = buildDefaultMonths();
   const last = S.months[S.months.length-1];
