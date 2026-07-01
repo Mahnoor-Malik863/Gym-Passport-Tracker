@@ -357,16 +357,15 @@ function loadData() {
     }
   }
 
-  // Drop any month earlier than March 2026 — tracking does not go back further than this
+  // Always enforce floor — remove any month before March 2026 from both the list and data
   const FLOOR = '2026-03';
-  const droppedMonths = S.months.filter(m => m < FLOOR);
-  if (droppedMonths.length > 0) {
-    S.months = S.months.filter(m => m >= FLOOR);
-    for (const m of droppedMonths) delete S.data[m];
-    saveData();
+  S.months = S.months.filter(m => m >= FLOOR);
+  for (const m of Object.keys(S.data)) {
+    if (m < FLOOR) delete S.data[m];
   }
 
   S.activeMonth = S.months[S.months.length-1];
+  saveData();
 }
 function saveData() {
   try {
