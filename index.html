@@ -331,38 +331,18 @@ function loadData() {
     }
   } catch(e){}
 
-  // One-time migration: earlier versions of this tracker mistakenly started in March 2025.
-  // Tracking actually began March 2026 — shift any 2025-labeled months forward one year,
-  // keeping all activation/deactivation/session/invoice data intact under the corrected month key.
-  const hasOldYear = S.months.some(m => m.startsWith('2025-'));
-  if (hasOldYear) {
-    const newMonths = S.months.map(m => m.startsWith('2025-') ? shiftYear(m,1) : m);
-    const newData = {};
-    for (const m of S.months) {
-      const newKey = m.startsWith('2025-') ? shiftYear(m,1) : m;
-      newData[newKey] = S.data[m];
-    }
-    S.months = [...new Set(newMonths)].sort();
-    S.data = newData;
-    saveData();
-  }
-
-  // extend months list if there's a gap to the real current month (handles old saves stuck in the past)
-  const realCurrent = buildDefaultMonths();
-  const last = S.months[S.months.length-1];
-  const lastRealIdx = realCurrent.indexOf(last);
-  if (lastRealIdx >= 0 && lastRealIdx < realCurrent.length-1) {
-    for (let i=lastRealIdx+1; i<realCurrent.length; i++) {
-      if (!S.months.includes(realCurrent[i])) S.months.push(realCurrent[i]);
-    }
-  }
-
-  // Always enforce floor — remove any month before March 2026 from both the list and data
+  // Hard floor: remove any month before 2026-03 from list and data store
   const FLOOR = '2026-03';
   S.months = S.months.filter(m => m >= FLOOR);
   for (const m of Object.keys(S.data)) {
     if (m < FLOOR) delete S.data[m];
   }
+
+  // Ensure months list is sorted and has no duplicates
+  S.months = [...new Set(S.months)].sort();
+
+  // If somehow empty, reset to starting month
+  if (S.months.length === 0) S.months = ['2026-03'];
 
   S.activeMonth = S.months[S.months.length-1];
   saveData();
@@ -996,19 +976,51 @@ function renderBudget() {
   },50);
 }
 
-// Moves all session data from one month to another (overwrites destination sessions)
-function moveMonthSessions() {
+// Moves ALL data (activations, deactivations, sessions, invoice) from one month to another
+function moveAllMonthData() {
   const from = document.getElementById('fix-from').value;
   const to = document.getElementById('fix-to').value;
   if (from === to) { toast('Choose two different months'); return; }
   const fromData = md(from);
   const toData = md(to);
-  const count = Object.keys(fromData.sessions).length;
-  if (count === 0) { toast(`No session data in ${ml(from)} to move`); return; }
+  toData.activations = [...fromData.activations];
+  toData.deactivations = [...fromData.deactivations];
   toData.sessions = {...fromData.sessions};
-  fromData.sessions = {};
+  toData.invoice = fromData.invoice;
+  S.data[from] = {activations:[], deactivations:[], sessions:{}, invoice:null};
   saveData();
-  toast(`Moved ${count} session records from ${ml(from)} to ${ml(to)}`);
+  toast(`Moved all data from ${ml(from)} to ${ml(to)}`);
+  render();
+}
+
+// Shifts every month's data forward or backward by N months
+function shiftAllData() {
+  const n = parseInt(document.getElementById('shift-n').value) || 0;
+  if (n === 0) { toast('Enter a non-zero shift value'); return; }
+  const FLOOR = '2026-03';
+
+  function addMonths(monthKey, delta) {
+    let [y,mo] = monthKey.split('-').map(Number);
+    mo += delta;
+    while (mo > 12) { mo -= 12; y++; }
+    while (mo < 1)  { mo += 12; y--; }
+    return `${y}-${String(mo).padStart(2,'0')}`;
+  }
+
+  const newData = {};
+  const newMonths = [];
+  for (const m of S.months) {
+    const shifted = addMonths(m, n);
+    if (shifted >= FLOOR) {
+      newData[shifted] = S.data[m] || {activations:[],deactivations:[],sessions:{},invoice:null};
+      newMonths.push(shifted);
+    }
+  }
+  S.months = [...new Set(newMonths)].sort();
+  S.data = newData;
+  S.activeMonth = S.months[S.months.length-1];
+  saveData();
+  toast(`Shifted all data by ${n > 0 ? '+' : ''}${n} months`);
   render();
 }
 
@@ -1020,6 +1032,16 @@ function clearMonthSessions() {
   d.sessions = {};
   saveData();
   toast(`Cleared ${count} session records from ${ml(from)}`);
+  render();
+}
+
+function undoLastImport() {
+  if (!S._lastImport) { toast('No import to undo'); return; }
+  const { month, prevSessions } = S._lastImport;
+  md(month).sessions = prevSessions;
+  S._lastImport = null;
+  saveData();
+  toast(`Undone — sessions restored for ${ml(month)}`);
   render();
 }
 
@@ -1049,10 +1071,12 @@ function renderAudit() {
       </div>
     </div>`:''}
     <div class="card" style="margin-bottom:16px">
-      <div class="card-head"><span class="card-title">Fix session data for a month</span></div>
-      <div style="padding:14px 18px;font-size:12px;color:var(--text-2)">
-        <div style="margin-bottom:10px">Move sessions from one month to another, or clear a month's sessions entirely — useful if a CSV was imported into the wrong month.</div>
-        <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
+      <div class="card-head"><span class="card-title">🔧 Data rescue tools</span></div>
+      <div style="padding:14px 18px">
+
+        <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--text-3);margin-bottom:8px">Move one month's data</div>
+        <div style="font-size:12px;color:var(--text-2);margin-bottom:10px">Move all data (activations, deactivations, sessions) from one month to another.</div>
+        <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:18px">
           <div>
             <label style="display:block;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--text-2);margin-bottom:5px">From</label>
             <select id="fix-from" style="padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:12px;background:var(--surface-2)">${S.months.map(m=>`<option value="${m}">${ml(m)}</option>`).join('')}</select>
@@ -1061,8 +1085,31 @@ function renderAudit() {
             <label style="display:block;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--text-2);margin-bottom:5px">To</label>
             <select id="fix-to" style="padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:12px;background:var(--surface-2)">${S.months.map(m=>`<option value="${m}">${ml(m)}</option>`).join('')}</select>
           </div>
-          <button class="btn" onclick="moveMonthSessions()"><i class="ti ti-arrow-right"></i>Move sessions</button>
-          <button class="btn" style="color:var(--red);border-color:#fecaca" onclick="clearMonthSessions()"><i class="ti ti-trash"></i>Clear sessions in "From"</button>
+          <button class="btn" onclick="moveAllMonthData()"><i class="ti ti-arrow-right"></i>Move all data</button>
+          <button class="btn" style="color:var(--red);border-color:#fecaca" onclick="clearMonthSessions()"><i class="ti ti-trash"></i>Clear sessions only</button>
+        </div>
+
+        <div style="border-top:1px solid var(--border);padding-top:16px;margin-bottom:8px">
+          <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--text-3);margin-bottom:8px">Shift all data by N months</div>
+          <div style="font-size:12px;color:var(--text-2);margin-bottom:10px">Moves every month's data forward or backward. Use this to fix a bulk migration that landed in the wrong months.</div>
+          <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
+            <div>
+              <label style="display:block;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--text-2);margin-bottom:5px">Shift by (months)</label>
+              <input id="shift-n" type="number" value="-4" style="width:90px;padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:12px;background:var(--surface-2)">
+            </div>
+            <button class="btn" onclick="shiftAllData()"><i class="ti ti-arrows-left-right"></i>Shift all data</button>
+          </div>
+          <div style="font-size:11px;color:var(--text-3);margin-top:6px">Negative = back in time, positive = forward. Preview: your Jul 2026 data would move to Mar 2026 with -4.</div>
+        </div>
+
+        <div style="border-top:1px solid var(--border);padding-top:16px">
+          <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--text-3);margin-bottom:8px">Undo last bulk import</div>
+          <div style="font-size:12px;color:var(--text-2);margin-bottom:10px">Clears sessions data for the last CSV or paste import, restoring the month to what it was before.</div>
+          ${S._lastImport
+            ? `<div style="font-size:11px;color:var(--text-3);margin-bottom:8px">Last import: ${S._lastImport.count} employees into ${ml(S._lastImport.month)} (${S._lastImport.ts})</div>
+               <button class="btn" style="color:var(--red);border-color:#fecaca" onclick="undoLastImport()"><i class="ti ti-rotate-left"></i>Undo import</button>`
+            : '<div style="font-size:12px;color:var(--text-3)">No bulk import on record this session.</div>'
+          }
         </div>
       </div>
     </div>
@@ -1247,11 +1294,10 @@ function saveCsvSessions() {
   const rows=parseGymPassportCsv(S._csvText);
   if (rows.length===0) { toast('Could not read employee/check-in columns from this file'); return; }
   const d=md(targetMonth);
+  // snapshot for undo
+  S._lastImport = { month: targetMonth, prevSessions: {...d.sessions}, count: rows.length, ts: new Date().toLocaleTimeString() };
   let count=0;
-  for (const r of rows) {
-    d.sessions[r.name]=r.checkins;
-    count++;
-  }
+  for (const r of rows) { d.sessions[r.name]=r.checkins; count++; }
   saveData(); closeModal(); S._csvText=null;
   S.activeMonth = targetMonth;
   toast(`Imported sessions for ${count} employees into ${ml(targetMonth)}`);
@@ -1347,6 +1393,7 @@ function saveBulkSessions() {
   const raw=document.getElementById('m-sess').value.trim();
   if(!raw)return;
   const d=md(S.activeMonth);
+  S._lastImport = { month: S.activeMonth, prevSessions: {...d.sessions}, count: 0, ts: new Date().toLocaleTimeString() };
   let count=0;
   for(const line of raw.split('\n').map(l=>l.trim()).filter(Boolean)){
     const parts=line.split(',').map(p=>p.trim());
@@ -1354,6 +1401,7 @@ function saveBulkSessions() {
     if(!name)continue;
     d.sessions[name]=sess;count++;
   }
+  S._lastImport.count = count;
   saveData(); closeModal();
   toast(`Updated ${count} session records`);
   render();
